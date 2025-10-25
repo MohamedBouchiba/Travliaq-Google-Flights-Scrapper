@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+env/
+.env
+data/raw/*
+data/processed/*
+data/exports/*
+!data/**/.gitkeep
+logs/*.log
+screenshots/*.png
+*.db
+*.sqlite
+.pytest_cache/
+.DS_Store
