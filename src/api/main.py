@@ -1,96 +1,130 @@
-"""
-API FastAPI pour Travliaq Google Flights Scraper
-"""
-
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from datetime import datetime
 import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
+from ..core.config import settings, PROJECT_NAME, API_VERSION, API_PREFIX
+from ..core.scraper_pool import scraper_pool
+from ..database.manager import db_manager
 from ..models.schemas import (
-    CalendarPricesRequest,
     CalendarPricesResponse,
-    FlightsRequest,
-    FlightsResponse,
     HealthResponse,
     ErrorResponse,
     CacheStatsResponse
 )
-from ..scrapers.calendar_scraper import CalendarScraper
-from ..database.manager import db_manager
-from ..core.config import settings, PROJECT_NAME, API_VERSION, API_PREFIX
-from ..core.exceptions import ScraperException
 from ..utils.logger import get_logger
+from .middleware.rate_limiter import rate_limit_middleware
+
+# Après la création de l'app
 
 logger = get_logger(__name__)
 
 
-# Lifecycle management
+# Imports conditionnels pour Sentry
+SENTRY_AVAILABLE = False
+sentry_sdk = None
+
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+    SENTRY_AVAILABLE = True
+except ImportError:
+    pass
+
+
+# Initialiser Sentry si DSN est défini ET si sentry est disponible
+if SENTRY_AVAILABLE and settings.sentry_dsn and settings.sentry_dsn.strip():
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        profiles_sample_rate=0.0,
+        send_default_pii=False,
+        integrations=[
+            FastApiIntegration(),
+            SqlalchemyIntegration(),
+        ],
+        before_send=lambda event, hint: event if settings.environment == "production" else None,
+        ignore_errors=[
+            KeyboardInterrupt,
+            "TimeoutError",
+        ],
+    )
+    logger.info("✓ Sentry initialisé")
+else:
+    logger.info("ℹ️  Sentry désactivé (pas de DSN ou module non installé)")
+
+
+# Lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Gestion du cycle de vie de l'application"""
-    logger.info(f"🚀 Démarrage {PROJECT_NAME}")
-    logger.info(f"   Version API: {API_VERSION}")
+    """Gestion du cycle de vie"""
+    logger.warning(f"🚀 Démarrage {PROJECT_NAME}")
+    logger.info(f"   Version: {API_VERSION}")
     logger.info(f"   Environment: {settings.environment}")
-    logger.info(f"   Database: {settings.database_url}")
-    
-    # Nettoyage du cache au démarrage si nécessaire
+
+    # Nettoyage au démarrage
     if settings.environment == "production":
         db_manager.clear_old_cache(days=7)
-    
+
     yield
-    
-    logger.info(f"🛑 Arrêt {PROJECT_NAME}")
+
+    # Arrêt propre
+    logger.warning(f"🛑 Arrêt {PROJECT_NAME}")
+    scraper_pool.shutdown()
 
 
-# Créer l'application
+# Créer l'app
 app = FastAPI(
     title=PROJECT_NAME,
     description="API pour scraper les prix des vols Google Flights",
     version=API_VERSION,
     lifespan=lifespan,
-    docs_url=f"{API_PREFIX}/docs",
-    redoc_url=f"{API_PREFIX}/redoc",
-    openapi_url=f"{API_PREFIX}/openapi.json"
+    docs_url=f"{API_PREFIX}/docs" if settings.environment != "production" else None,
+    redoc_url=None,
+    openapi_url=f"{API_PREFIX}/openapi.json" if settings.environment != "production" else None,
 )
 
-# CORS Middleware
+app.middleware("http")(rate_limit_middleware)
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En prod: spécifier les origines autorisées
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+
+
 # ==================== EXCEPTION HANDLERS ====================
-
-@app.exception_handler(ScraperException)
-async def scraper_exception_handler(request, exc: ScraperException):
-    """Handler pour les exceptions du scraper"""
-    logger.error(f"ScraperException: {exc.message}")
-    return JSONResponse(
-        status_code=500,
-        content=ErrorResponse(
-            error=exc.message,
-            detail=str(exc.details) if exc.details else None
-        ).dict()
-    )
-
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc: Exception):
-    """Handler général pour toutes les exceptions"""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    """Handler général avec logging détaillé"""
+    import traceback
+
+    # Logger l'erreur complète
+    logger.error(f"Exception non gérée: {exc}")
+    logger.error(f"Traceback:\n{traceback.format_exc()}")
+
+    # Envoyer à Sentry si disponible
+    if SENTRY_AVAILABLE and settings.sentry_dsn and sentry_sdk:
+        sentry_sdk.capture_exception(exc)
+
     return JSONResponse(
         status_code=500,
         content=ErrorResponse(
             error="Internal server error",
-            detail=str(exc) if settings.debug else None
-        ).dict()
+            detail=str(exc) if settings.debug else "Une erreur est survenue"
+        ).model_dump()
     )
 
 
@@ -102,14 +136,11 @@ async def general_exception_handler(request, exc: Exception):
     tags=["System"]
 )
 async def health_check():
-    """
-    Vérifie l'état de santé de l'API
-    """
+    """Vérifie l'état de santé de l'API"""
     try:
-        # Tester la connexion DB
         with db_manager.get_session() as session:
             session.execute("SELECT 1")
-        
+
         return HealthResponse(
             status="healthy",
             version=API_VERSION,
@@ -130,65 +161,70 @@ async def health_check():
     f"{API_PREFIX}/calendar-prices",
     response_model=CalendarPricesResponse,
     tags=["Scraping"],
-    summary="Récupère les prix du calendrier",
-    description="Récupère tous les prix minimum par jour sur plusieurs mois. Utilise le cache si disponible."
 )
 async def get_calendar_prices(
-    origin: str = Query(..., description="Code IATA aéroport de départ", example="BRU"),
-    destination: str = Query(..., description="Code IATA aéroport d'arrivée", example="CDG"),
-    months: int = Query(3, ge=1, le=12, description="Nombre de mois à scraper"),
-    force_refresh: bool = Query(False, description="Forcer le re-scraping même si cache valide"),
-    background_tasks: BackgroundTasks = None
+    origin: str = Query(..., description="Code IATA aéroport de départ"),
+    destination: str = Query(..., description="Code IATA aéroport d'arrivée"),
+    start_date: str = Query(..., description="Date début (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="Date fin (YYYY-MM-DD)"),
+    force_refresh: bool = Query(False, description="Forcer le re-scraping"),
 ):
-    """
-    Endpoint principal pour récupérer les prix du calendrier
-    
-    **Logique:**
-    1. Vérifie le cache (si force_refresh=false)
-    2. Si cache valide → retourne immédiatement
-    3. Sinon → lance le scraping
-    4. Sauvegarde en cache
-    5. Retourne les résultats
-    """
+    """Endpoint asynchrone pour scraping parallèle"""
+
     start_time = time.time()
-    
-    logger.info(f"📥 Requête calendar-prices: {origin}-{destination}, {months} mois")
-    
-    # Normaliser les codes aéroports
+
+    logger.info(f"📥 Requête: {origin}->{destination}, {start_date} -> {end_date}")
+
+    # Normaliser
     origin = origin.upper()
     destination = destination.upper()
-    
-    # Vérifier le cache si pas de force_refresh
+
+    # Vérifier cache
     if not force_refresh:
-        cached_prices = db_manager.get_cached_calendar_prices(origin, destination)
+        cached_prices = db_manager.get_cached_calendar_prices(
+            origin, destination, start_date, end_date
+        )
+
         if cached_prices:
             duration = time.time() - start_time
             logger.info(f"✓ Cache hit ({duration:.2f}s)")
-            
+
             return CalendarPricesResponse.from_prices_dict(
                 origin=origin,
                 destination=destination,
+                start_date=start_date,
+                end_date=end_date,
                 prices=cached_prices,
                 from_cache=True
             )
-    
-    # Pas de cache ou force_refresh → scraper
-    logger.info(f"🕷️  Lancement scraping...")
-    
+
+    # Scraping
+    logger.info(f"🕷️  Soumission job scraping...")
+
     try:
-        scraper = CalendarScraper(headless=settings.headless)
-        prices = scraper.scrape(origin, destination, months_ahead=months)
-        
+        job_id = scraper_pool.submit_scrape(origin, destination, start_date, end_date)
+
+        loop = asyncio.get_event_loop()
+        executor = ThreadPoolExecutor()
+
+        # Attendre avec timeout de 5 minutes
+        prices = await loop.run_in_executor(
+            executor,
+            scraper_pool.wait_for_job,
+            job_id,
+            300  # 5 minutes
+        )
+
         if not prices:
             raise HTTPException(
                 status_code=404,
-                detail=f"Aucun prix trouvé pour {origin}-{destination}"
+                detail=f"Aucun prix trouvé"
             )
-        
-        # Sauvegarder en cache
+
+        # Sauvegarder
         db_manager.save_calendar_prices(origin, destination, prices)
-        
-        # Logger le scraping
+
+        # Logger
         duration = time.time() - start_time
         db_manager.log_scrape(
             scrape_type="calendar",
@@ -198,20 +234,28 @@ async def get_calendar_prices(
             results_count=len(prices),
             started_at=datetime.fromtimestamp(start_time),
             duration_seconds=duration,
-            params={"months": months}
+            params={"start_date": start_date, "end_date": end_date}
         )
-        
-        logger.info(f"✓ Scraping terminé ({duration:.2f}s)")
-        
+
+        logger.info(f"✓ Scraping terminé ({duration:.1f}s)")
+
         return CalendarPricesResponse.from_prices_dict(
             origin=origin,
             destination=destination,
+            start_date=start_date,
+            end_date=end_date,
             prices=prices,
             from_cache=False
         )
-        
-    except ScraperException as e:
-        # Logger l'échec
+
+    except TimeoutError:
+        logger.error(f"⏰ Timeout pour {origin}->{destination}")
+        raise HTTPException(
+            status_code=504,
+            detail="Scraping timeout - le serveur a mis trop de temps"
+        )
+    except Exception as e:
+        logger.error(f"❌ Erreur: {e}")
         db_manager.log_scrape(
             scrape_type="calendar",
             origin=origin,
@@ -221,6 +265,11 @@ async def get_calendar_prices(
             started_at=datetime.fromtimestamp(start_time),
             duration_seconds=time.time() - start_time
         )
+
+        # Envoyer à Sentry si configuré
+        if SENTRY_AVAILABLE and settings.sentry_dsn and sentry_sdk:
+            sentry_sdk.capture_exception(e)
+
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -232,20 +281,18 @@ async def get_calendar_prices(
     tags=["Cache"]
 )
 async def get_cache_stats():
-    """
-    Récupère les statistiques du cache
-    """
+    """Récupère les statistiques du cache"""
     stats = db_manager.get_cache_stats()
-    
-    from src.models.schemas import CacheInfo
-    
+
+    from ..models.schemas import CacheInfo
+
     cache_info = CacheInfo(
         total_entries=stats.get('total_entries', 0),
         oldest_entry=stats.get('oldest_entry'),
         newest_entry=stats.get('newest_entry'),
         total_routes=stats.get('total_routes', 0)
     )
-    
+
     return CacheStatsResponse(
         cache_info=cache_info,
         recent_scrapes=stats.get('recent_scrapes', [])
@@ -259,9 +306,7 @@ async def get_cache_stats():
 async def clear_cache(
     days: int = Query(7, ge=1, description="Supprimer les entrées plus vieilles que N jours")
 ):
-    """
-    Nettoie le cache
-    """
+    """Nettoie le cache"""
     try:
         db_manager.clear_old_cache(days=days)
         return {"message": f"Cache nettoyé (> {days} jours)"}
@@ -273,13 +318,11 @@ async def clear_cache(
 
 @app.get("/", tags=["System"])
 async def root():
-    """
-    Endpoint racine
-    """
+    """Endpoint racine"""
     return {
         "name": PROJECT_NAME,
         "version": API_VERSION,
         "status": "running",
-        "docs": f"{API_PREFIX}/docs",
+        "docs": f"{API_PREFIX}/docs" if settings.environment != "production" else None,
         "health": f"{API_PREFIX}/health"
     }

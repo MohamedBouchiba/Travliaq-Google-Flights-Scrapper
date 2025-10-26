@@ -1,105 +1,70 @@
-"""
-Configuration avancée du logging avec colorlog
-Logs colorés dans la console et fichiers rotatifs
-"""
+# src/utils/logger.py - VERSION MINIMALISTE
 
 import logging
 import logging.handlers
 from pathlib import Path
 from typing import Optional
-import colorlog
-from src.core.config import settings
+from ..core.config import settings
 
 
-class Logger:
-    """Gestionnaire de logging centralisé"""
-    
+class ProductionLogger:
+    """Logger optimisé pour production (minimal)"""
+
     _loggers = {}
-    
+
     @classmethod
-    def get_logger(cls, name: str, log_file: Optional[str] = None) -> logging.Logger:
-        """
-        Obtient ou crée un logger
-        
-        Args:
-            name: Nom du logger (généralement __name__)
-            log_file: Fichier de log spécifique (optionnel)
-            
-        Returns:
-            Logger configuré
-        """
+    def get_logger(cls, name: str) -> logging.Logger:
+        """Obtient un logger configuré"""
         if name in cls._loggers:
             return cls._loggers[name]
-        
+
         logger = logging.getLogger(name)
         logger.setLevel(settings.log_level)
-        
-        # Éviter les doublons de handlers
+
         if logger.handlers:
             return logger
-        
-        # Format des logs
-        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        date_format = "%Y-%m-%d %H:%M:%S"
-        
-        # Handler console avec couleurs
-        console_handler = colorlog.StreamHandler()
-        console_handler.setLevel(settings.log_level)
-        
-        color_formatter = colorlog.ColoredFormatter(
-            "%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt=date_format,
-            log_colors={
-                'DEBUG': 'cyan',
-                'INFO': 'green',
-                'WARNING': 'yellow',
-                'ERROR': 'red',
-                'CRITICAL': 'red,bg_white',
-            }
-        )
-        console_handler.setFormatter(color_formatter)
-        logger.addHandler(console_handler)
-        
-        # Handler fichier avec rotation
-        log_file_path = log_file or settings.log_file
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file_path,
-            maxBytes=10*1024*1024,  # 10 MB
-            backupCount=5,
-            encoding='utf-8'
-        )
-        file_handler.setLevel(logging.DEBUG)  # Toujours DEBUG dans les fichiers
-        
-        file_formatter = logging.Formatter(log_format, datefmt=date_format)
-        file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
-        
-        # Handler fichier d'erreurs séparé
-        error_log_file = Path(log_file_path).parent / "errors.log"
-        error_handler = logging.handlers.RotatingFileHandler(
-            str(error_log_file),
-            maxBytes=10*1024*1024,
-            backupCount=5,
-            encoding='utf-8'
-        )
-        error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(file_formatter)
-        logger.addHandler(error_handler)
-        
+
+        # En production: seulement fichier rotatif, pas de console
+        if settings.environment == "production":
+            # Fichier avec rotation stricte
+            file_handler = logging.handlers.RotatingFileHandler(
+                settings.log_file,
+                maxBytes=settings.log_rotation_size * 1024 * 1024,  # MB en bytes
+                backupCount=2,  # Garder 2 backups max
+                encoding='utf-8'
+            )
+            file_handler.setLevel(logging.WARNING)  # Seulement WARNING et plus
+
+            formatter = logging.Formatter(
+                '%(asctime)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+        else:
+            # Dev: console colorée
+            import colorlog
+            console_handler = colorlog.StreamHandler()
+            console_handler.setLevel(settings.log_level)
+
+            color_formatter = colorlog.ColoredFormatter(
+                "%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                datefmt="%H:%M:%S",
+                log_colors={
+                    'DEBUG': 'cyan',
+                    'INFO': 'green',
+                    'WARNING': 'yellow',
+                    'ERROR': 'red',
+                    'CRITICAL': 'red,bg_white',
+                }
+            )
+            console_handler.setFormatter(color_formatter)
+            logger.addHandler(console_handler)
+
         cls._loggers[name] = logger
         return logger
 
 
 def get_logger(name: str) -> logging.Logger:
-    """
-    Fonction helper pour obtenir un logger
-    
-    Usage:
-        from src.utils.logger import get_logger
-        logger = get_logger(__name__)
-    """
-    return Logger.get_logger(name)
-
-
-# Logger par défaut pour l'application
-app_logger = get_logger("travliaq.scraper")
+    """Helper pour obtenir un logger"""
+    return ProductionLogger.get_logger(name)

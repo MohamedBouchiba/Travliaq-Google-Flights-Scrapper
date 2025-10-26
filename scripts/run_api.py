@@ -1,3 +1,5 @@
+# scripts/run_api.py - MODIFIER pour ajouter la protection multiprocessing
+
 """
 Script pour lancer l'API FastAPI
 Usage: python scripts/run_api.py
@@ -19,7 +21,7 @@ logger = get_logger(__name__)
 
 def main():
     """Lance le serveur API"""
-    
+
     logger.info("="*60)
     logger.info("🚀 Démarrage de l'API Travliaq Google Flights Scraper")
     logger.info("="*60)
@@ -35,7 +37,7 @@ def main():
     logger.info("")
     logger.info("Appuyez sur CTRL+C pour arrêter")
     logger.info("="*60)
-    
+
     try:
         uvicorn.run(
             "src.api.main:app",
@@ -52,5 +54,10 @@ def main():
         sys.exit(1)
 
 
+# CRITIQUE: Protection multiprocessing pour Windows
 if __name__ == "__main__":
+    # Nécessaire pour multiprocessing sur Windows
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     main()

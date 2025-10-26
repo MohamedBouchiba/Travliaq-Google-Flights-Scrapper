@@ -5,25 +5,7 @@ Modèles Pydantic pour validation et sérialisation des données API
 from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, List
 from datetime import date, datetime
-from src.utils.validators import Validators
-
-
-class CalendarPricesRequest(BaseModel):
-    """Requête pour obtenir les prix du calendrier"""
-    origin: str = Field(..., description="Code IATA aéroport de départ", example="BRU")
-    destination: str = Field(..., description="Code IATA aéroport d'arrivée", example="CDG")
-    months: int = Field(default=3, ge=1, le=12, description="Nombre de mois à scraper")
-    force_refresh: bool = Field(default=False, description="Forcer le re-scraping même si cache valide")
-    
-    @validator('origin', 'destination')
-    def validate_airport_codes(cls, v):
-        return Validators.validate_airport_code(v)
-    
-    @validator('destination')
-    def validate_different_airports(cls, v, values):
-        if 'origin' in values and v == values['origin']:
-            raise ValueError("Origine et destination doivent être différentes")
-        return v
+from ..utils.validators import Validators
 
 
 class FlightsRequest(BaseModel):
@@ -34,11 +16,11 @@ class FlightsRequest(BaseModel):
     return_date: Optional[str] = Field(None, description="Date de retour (YYYY-MM-DD)", example="2025-12-20")
     passengers: int = Field(default=1, ge=1, le=9, description="Nombre de passagers")
     force_refresh: bool = Field(default=False, description="Forcer le re-scraping")
-    
+
     @validator('origin', 'destination')
     def validate_airport_codes(cls, v):
         return Validators.validate_airport_code(v)
-    
+
     @validator('departure_date', 'return_date')
     def validate_dates(cls, v):
         if v:
@@ -52,54 +34,6 @@ class PricePoint(BaseModel):
     price: float = Field(..., description="Prix minimum en EUR")
 
 
-class CalendarPricesResponse(BaseModel):
-    """Réponse avec les prix du calendrier"""
-    origin: str
-    destination: str
-    prices: Dict[str, float] = Field(..., description="Dict {date: prix}")
-    total_dates: int = Field(..., description="Nombre de dates avec prix")
-    min_price: Optional[float] = Field(None, description="Prix minimum trouvé")
-    max_price: Optional[float] = Field(None, description="Prix maximum trouvé")
-    avg_price: Optional[float] = Field(None, description="Prix moyen")
-    best_dates: List[PricePoint] = Field(default=[], description="Top 5 meilleures dates")
-    scraped_at: datetime = Field(default_factory=datetime.now, description="Timestamp du scraping")
-    from_cache: bool = Field(default=False, description="Données issues du cache")
-    
-    @classmethod
-    def from_prices_dict(cls, 
-                        origin: str, 
-                        destination: str, 
-                        prices: Dict[str, float],
-                        from_cache: bool = False):
-        """Factory pour créer une réponse depuis un dict de prix"""
-        if not prices:
-            return cls(
-                origin=origin,
-                destination=destination,
-                prices={},
-                total_dates=0,
-                from_cache=from_cache
-            )
-        
-        price_values = list(prices.values())
-        sorted_prices = sorted(prices.items(), key=lambda x: x[1])
-        
-        return cls(
-            origin=origin,
-            destination=destination,
-            prices=prices,
-            total_dates=len(prices),
-            min_price=min(price_values),
-            max_price=max(price_values),
-            avg_price=sum(price_values) / len(price_values),
-            best_dates=[
-                PricePoint(date=date, price=price) 
-                for date, price in sorted_prices[:5]
-            ],
-            from_cache=from_cache
-        )
-
-
 class FlightDetails(BaseModel):
     """Détails d'un vol"""
     index: int
@@ -110,6 +44,100 @@ class FlightDetails(BaseModel):
     stops: Optional[int] = None
     price: Optional[float] = None
     raw_text: Optional[str] = None
+
+
+class CalendarPricesRequest(BaseModel):
+    """Requête pour obtenir les prix du calendrier"""
+    origin: str = Field(..., description="Code IATA aéroport de départ", example="BRU")
+    destination: str = Field(..., description="Code IATA aéroport d'arrivée", example="CDG")
+    start_date: str = Field(..., description="Date de début (YYYY-MM-DD)", example="2025-11-01")
+    end_date: str = Field(..., description="Date de fin (YYYY-MM-DD)", example="2025-12-31")
+    force_refresh: bool = Field(default=False, description="Forcer le re-scraping")
+
+    @validator('origin', 'destination')
+    def validate_airport_codes(cls, v):
+        return Validators.validate_airport_code(v)
+
+    @validator('destination')
+    def validate_different_airports(cls, v, values):
+        if 'origin' in values and v == values['origin']:
+            raise ValueError("Origine et destination doivent être différentes")
+        return v
+
+    @validator('start_date', 'end_date')
+    def validate_dates(cls, v):
+        from datetime import datetime
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"Format de date invalide: {v}. Attendu: YYYY-MM-DD")
+        return v
+
+    @validator('end_date')
+    def validate_date_range(cls, v, values):
+        if 'start_date' in values:
+            from datetime import datetime
+            start = datetime.strptime(values['start_date'], "%Y-%m-%d")
+            end = datetime.strptime(v, "%Y-%m-%d")
+            if end < start:
+                raise ValueError("end_date doit être après start_date")
+        return v
+
+
+class CalendarPricesResponse(BaseModel):
+    """Réponse avec les prix du calendrier"""
+    origin: str
+    destination: str
+    start_date: str
+    end_date: str
+    prices: Dict[str, float] = Field(..., description="Dict {date: prix}")
+    total_dates: int = Field(..., description="Nombre de dates avec prix")
+    min_price: Optional[float] = Field(None, description="Prix minimum")
+    max_price: Optional[float] = Field(None, description="Prix maximum")
+    avg_price: Optional[float] = Field(None, description="Prix moyen")
+    best_dates: List[PricePoint] = Field(default=[], description="Top 5 meilleures dates")
+    scraped_at: datetime = Field(default_factory=datetime.now)
+    from_cache: bool = Field(default=False)
+
+    @classmethod
+    def from_prices_dict(cls,
+                         origin: str,
+                         destination: str,
+                         start_date: str,
+                         end_date: str,
+                         prices: Dict[str, float],
+                         from_cache: bool = False):
+        """Factory pour créer une réponse"""
+        if not prices:
+            return cls(
+                origin=origin,
+                destination=destination,
+                start_date=start_date,
+                end_date=end_date,
+                prices={},
+                total_dates=0,
+                from_cache=from_cache
+            )
+
+        price_values = list(prices.values())
+        sorted_prices = sorted(prices.items(), key=lambda x: x[1])
+
+        return cls(
+            origin=origin,
+            destination=destination,
+            start_date=start_date,
+            end_date=end_date,
+            prices=prices,
+            total_dates=len(prices),
+            min_price=min(price_values),
+            max_price=max(price_values),
+            avg_price=sum(price_values) / len(price_values),
+            best_dates=[
+                PricePoint(date=date, price=price)
+                for date, price in sorted_prices[:5]
+            ],
+            from_cache=from_cache
+        )
 
 
 class FlightsResponse(BaseModel):

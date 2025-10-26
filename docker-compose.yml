@@ -1,0 +1,38 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: travliaq-scraper
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - HEADLESS=true
+      - SCREENSHOT_ON_ERROR=false
+      - LOG_LEVEL=WARNING
+      - DATABASE_URL=sqlite:///data/flights.db
+      - CACHE_TTL_MINUTES=60
+      - SENTRY_DSN=https://ae689b29ff1699cdfa6e7dd55ecca855@o4510257788616704.ingest.de.sentry.io/4510257791369296
+      - SENTRY_ENVIRONMENT=production
+      - SENTRY_TRACES_SAMPLE_RATE=0.1
+    volumes:
+      - ./data:/app/data
+      - /dev/shm:/dev/shm  # Partagé memory pour Chrome
+    shm_size: '2gb'
+    mem_limit: 4g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

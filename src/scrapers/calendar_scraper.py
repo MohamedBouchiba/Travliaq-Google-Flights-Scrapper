@@ -67,12 +67,27 @@ class CalendarScraper:
     # ==================== UTILITIES ====================
 
     def _random_delay(self, min_sec: float = None, max_sec: float = None):
-        """Délai aléatoire pour simuler comportement humain"""
+        """Délai aléatoire AUGMENTÉ pour sembler humain"""
         min_sec = min_sec or settings.delay_between_requests_min
         max_sec = max_sec or settings.delay_between_requests_max
         delay = random.uniform(min_sec, max_sec)
         time.sleep(delay)
 
+    def _simulate_reading(self):
+        """Simule un humain qui lit la page"""
+        if settings.simulate_human and self.driver:
+            try:
+                # Scroll aléatoire
+                for _ in range(random.randint(2, 4)):
+                    scroll_amount = random.randint(100, 300)
+                    self.driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
+                    time.sleep(random.uniform(0.5, 1.2))
+
+                # Scroll retour
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(random.uniform(0.3, 0.7))
+            except:
+                pass
     def _save_screenshot(self, name: str = "error"):
         """Sauvegarde une capture d'écran"""
         if settings.screenshot_on_error and self.driver:
@@ -269,6 +284,8 @@ class CalendarScraper:
 
         return result
 
+
+
     def _focus_on_month(self, target_month_name: str, target_year: int, max_attempts: int = 60) -> bool:
         """
         Navigue vers le mois cible (scroll ou clic Suivant/Précédent)
@@ -411,12 +428,13 @@ class CalendarScraper:
             return (None, None)
         price = float(digits)
 
-        return (day, price)
+        return day, price
 
     def _wait_prices_ready(self, target_month: str, target_year: int,
-                          min_cells: int = 4, timeout: float = 7.0) -> bool:
+                           min_cells: int = 4, timeout: float = 10.0) -> bool:
         """
-        Attend que le mois ait au moins quelques cellules avec prix
+        Attend que le mois ait des cellules avec prix
+        TIMEOUT AUGMENTÉ: 10s au lieu de 7s
         """
         target_num = self._month_num(target_month)
         deadline = time.time() + timeout
@@ -428,7 +446,6 @@ class CalendarScraper:
                 if not dt or dt.year != target_year or dt.month != target_num:
                     continue
 
-                # Vérifier qu'il y a un prix
                 try:
                     price_el = cell.find_element(By.CSS_SELECTOR, "[jsname='qCDwBb']")
                     price_txt = price_el.text.strip()
@@ -442,7 +459,7 @@ class CalendarScraper:
             if ready_count >= min_cells:
                 return True
 
-            time.sleep(0.25)
+            time.sleep(0.3)
 
         return False
 
@@ -483,6 +500,100 @@ class CalendarScraper:
         return prices
 
     # ==================== MAIN SCRAPE METHOD ====================
+
+    def scrape_date_range(
+            self,
+            origin: str,
+            destination: str,
+            start_date: str,
+            end_date: str
+    ) -> Dict[str, float]:
+        """
+        Scrape les prix pour une plage de dates spécifique
+
+        Args:
+            origin: Code IATA départ
+            destination: Code IATA arrivée
+            start_date: Date début (YYYY-MM-DD)
+            end_date: Date fin (YYYY-MM-DD)
+
+        Returns:
+            Dict {date: prix}
+        """
+        from datetime import datetime, date
+        import time
+
+        # Valider
+        origin, destination = Validators.validate_route(origin, destination)
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+        if start > end:
+            raise ValueError("start_date doit être avant end_date")
+
+        # Calculer les mois uniques dans la plage
+        months_set = set()
+        current = start
+        while current <= end:
+            months_set.add((current.year, current.month))
+            # Mois suivant
+            if current.month == 12:
+                current = date(current.year + 1, 1, 1)
+            else:
+                current = date(current.year, current.month + 1, 1)
+
+        logger.info(f"Scraping {len(months_set)} mois pour {start_date} → {end_date}")
+
+        all_prices = {}
+
+        try:
+            # Init driver
+            self.driver = self.driver_manager.create_driver()
+            self.wait = self.driver_manager.wait
+
+            # Charger page
+            url = self._build_url(origin, destination)
+            logger.info(f"🌐 {origin} → {destination}")
+            self.driver.get(url)
+            time.sleep(5)
+
+            self._handle_consent()
+            time.sleep(1)
+            self._handle_popups()
+            time.sleep(1)
+
+            # Ouvrir calendrier
+            if not self._open_calendar():
+                raise CalendarNotFoundError("Impossible d'ouvrir le calendrier")
+
+            # Scraper chaque mois
+            for idx, (year, month_num) in enumerate(sorted(months_set), 1):
+                month_name = self._month_name(month_num)
+                logger.info(f"📊 Mois {idx}/{len(months_set)}: {month_name} {year}")
+
+                if not self._focus_on_month(month_name, year):
+                    logger.warning(f"⚠️ Skip {month_name} {year}")
+                    continue
+
+                month_prices = self._extract_prices_for_month(month_name, year)
+                all_prices.update(month_prices)
+                time.sleep(0.5)
+
+            # Filtrer la plage exacte
+            filtered = {
+                d: p for d, p in all_prices.items()
+                if start_date <= d <= end_date
+            }
+
+            logger.info(f"✅ {len(filtered)} prix dans [{start_date}, {end_date}]")
+            return filtered
+
+        except Exception as e:
+            logger.error(f"❌ Erreur: {e}", exc_info=True)
+            self._save_screenshot("error")
+            raise
+        finally:
+            self.close()
 
     def scrape(
         self,

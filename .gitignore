@@ -13,3 +13,4 @@ screenshots/*.png
 *.sqlite
 .pytest_cache/
 .DS_Store
+kill_port_8000.ps1

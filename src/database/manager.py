@@ -78,45 +78,57 @@ class DatabaseManager:
             session.close()
     
     # ==================== CALENDAR PRICES ====================
-    
+
     def get_cached_calendar_prices(
-        self, 
-        origin: str, 
-        destination: str,
-        max_age_minutes: Optional[int] = None
+            self,
+            origin: str,
+            destination: str,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            max_age_minutes: Optional[int] = None
     ) -> Optional[Dict[str, float]]:
         """
         Récupère les prix du calendrier depuis le cache
-        
+
         Args:
             origin: Code aéroport départ
             destination: Code aéroport arrivée
-            max_age_minutes: Age maximum du cache (None = utiliser config)
-            
+            start_date: Date début optionnelle pour filtrer
+            end_date: Date fin optionnelle pour filtrer
+            max_age_minutes: Age maximum du cache
+
         Returns:
-            Dict {date: prix} ou None si pas de cache valide
+            Dict {date: prix} ou None
         """
         max_age = max_age_minutes or settings.cache_ttl_minutes
         cutoff_time = datetime.now() - timedelta(minutes=max_age)
-        
+
         try:
             with self.get_session() as session:
-                prices = session.query(CalendarPrice).filter(
+                query = session.query(CalendarPrice).filter(
                     and_(
                         CalendarPrice.origin == origin,
                         CalendarPrice.destination == destination,
                         CalendarPrice.scraped_at >= cutoff_time
                     )
-                ).all()
-                
+                )
+
+                # Filtrer par plage de dates si fournie
+                if start_date:
+                    query = query.filter(CalendarPrice.date >= start_date)
+                if end_date:
+                    query = query.filter(CalendarPrice.date <= end_date)
+
+                prices = query.all()
+
                 if not prices:
                     logger.debug(f"Pas de cache valide pour {origin}-{destination}")
                     return None
-                
+
                 result = {p.date: p.price for p in prices}
                 logger.info(f"✓ Cache hit: {len(result)} prix pour {origin}-{destination}")
                 return result
-                
+
         except Exception as e:
             logger.error(f"Erreur lecture cache: {e}")
             return None
