@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 import time
 
-from src.models.schemas import (
+from ..models.schemas import (
     CalendarPricesRequest,
     CalendarPricesResponse,
     FlightsRequest,
@@ -18,11 +18,11 @@ from src.models.schemas import (
     ErrorResponse,
     CacheStatsResponse
 )
-from src.scrapers.calendar_scraper import CalendarScraper
-from src.database.db_manager import db_manager
-from src.core.config import settings, PROJECT_NAME, API_VERSION, API_PREFIX
-from src.core.exceptions import ScraperException
-from src.utils.logger import get_logger
+from ..scrapers.calendar_scraper import CalendarScraper
+from ..database.manager import db_manager
+from ..core.config import settings, PROJECT_NAME, API_VERSION, API_PREFIX
+from ..core.exceptions import ScraperException
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

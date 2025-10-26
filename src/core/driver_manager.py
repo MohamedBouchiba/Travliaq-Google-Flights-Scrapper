@@ -18,9 +18,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 
-from src.core.config import settings
-from src.core.exceptions import DriverInitializationError
-from src.utils.logger import get_logger
+from ..core.config import settings
+from ..core.exceptions import DriverInitializationError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

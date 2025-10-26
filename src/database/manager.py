@@ -9,10 +9,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 import json
 
-from src.database.models import Base, CalendarPrice, Flight, ScrapeLog
-from src.core.config import settings
-from src.core.exceptions import DatabaseError
-from src.utils.logger import get_logger
+from ..database.models import Base, CalendarPrice, Flight, ScrapeLog
+from ..core.config import settings
+from ..core.exceptions import DatabaseError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
