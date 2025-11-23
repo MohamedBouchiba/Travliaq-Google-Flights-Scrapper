@@ -31,8 +31,8 @@ class CalendarPrice(Base):
     # Index composé pour les recherches rapides
     __table_args__ = (
         UniqueConstraint('origin', 'destination', 'date', name='uix_route_date'),
-        Index('idx_route', 'origin', 'destination'),
-        Index('idx_scraped_at', 'scraped_at'),
+        Index('idx_cp_route', 'origin', 'destination'),
+        Index('idx_cp_scraped_at', 'scraped_at'),
     )
     
     def __repr__(self):
@@ -79,7 +79,7 @@ class Flight(Base):
     
     __table_args__ = (
         Index('idx_flight_route', 'origin', 'destination', 'departure_date'),
-        Index('idx_scraped_at', 'scraped_at'),
+        Index('idx_flight_scraped_at', 'scraped_at'),
     )
     
     def __repr__(self):
