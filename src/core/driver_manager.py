@@ -54,8 +54,16 @@ class DriverManager:
                     service = Service(ChromeDriverManager().install())
             else:
                 # Linux/Docker: chemin standard
-                logger.info("Linux détecté - driver à /usr/local/bin/chromedriver")
-                service = Service('/usr/local/bin/chromedriver')
+                logger.info("Linux détecté")
+                
+                # Check if using Chromium (ARM64/Docker)
+                if Path("/usr/bin/chromium").exists():
+                    logger.info("Chromium détecté (ARM64/Docker)")
+                    options.binary_location = "/usr/bin/chromium"
+                    service = Service('/usr/bin/chromedriver')
+                else:
+                    logger.info("Utilisation configuration standard Chrome")
+                    service = Service('/usr/local/bin/chromedriver')
 
             # Créer le driver
             self.driver = webdriver.Chrome(service=service, options=options)
