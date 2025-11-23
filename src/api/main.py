@@ -85,9 +85,9 @@ app = FastAPI(
     description="API pour scraper les prix des vols Google Flights",
     version=API_VERSION,
     lifespan=lifespan,
-    docs_url=f"{API_PREFIX}/docs" if settings.environment != "production" else None,
+    docs_url=f"{API_PREFIX}/docs",
     redoc_url=None,
-    openapi_url=f"{API_PREFIX}/openapi.json" if settings.environment != "production" else None,
+    openapi_url=f"{API_PREFIX}/openapi.json",
 )
 
 app.middleware("http")(rate_limit_middleware)
@@ -327,6 +327,6 @@ async def root():
         "name": PROJECT_NAME,
         "version": API_VERSION,
         "status": "running",
-        "docs": f"{API_PREFIX}/docs" if settings.environment != "production" else None,
+        "docs": f"{API_PREFIX}/docs",
         "health": f"{API_PREFIX}/health"
     }
