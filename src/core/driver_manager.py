@@ -53,24 +53,24 @@ class DriverManager:
                     from webdriver_manager.chrome import ChromeDriverManager
                     service = Service(ChromeDriverManager().install())
             else:
-                # Linux/Docker: chemin standard
-                logger.info("Linux détecté")
+                # Linux/Docker: use pre-installed chromedriver
+                logger.info("Linux détecté - utilisation chromedriver pré-installé")
+                chromedriver_path = Path("/usr/local/bin/chromedriver")
                 
-                # Check if using Chromium (ARM64/Docker)
-                if Path("/usr/bin/chromium").exists():
-                    logger.info("Chromium détecté (ARM64/Docker)")
-                    options.binary_location = "/usr/bin/chromium"
-                    service = Service('/usr/bin/chromedriver')
+                if chromedriver_path.exists():
+                    service = Service(str(chromedriver_path))
+                    logger.info(f"ChromeDriver trouvé à: {chromedriver_path}")
                 else:
-                    logger.info("Utilisation webdriver-manager pour Linux")
+                    # Fallback to webdriver-manager if not pre-installed
+                    logger.info("ChromeDriver non trouvé, utilisation webdriver-manager")
                     from webdriver_manager.chrome import ChromeDriverManager
                     service = Service(ChromeDriverManager().install())
-                    
-                    # Définir explicitement le binaire Chrome si nécessaire
-                    if Path("/usr/bin/google-chrome").exists():
-                        options.binary_location = "/usr/bin/google-chrome"
-                    elif Path("/usr/bin/google-chrome-stable").exists():
-                        options.binary_location = "/usr/bin/google-chrome-stable"
+                
+                # Set Chrome binary location
+                if Path("/usr/bin/google-chrome-stable").exists():
+                    options.binary_location = "/usr/bin/google-chrome-stable"
+                elif Path("/usr/bin/google-chrome").exists():
+                    options.binary_location = "/usr/bin/google-chrome"
 
             # Créer le driver
             self.driver = webdriver.Chrome(service=service, options=options)
