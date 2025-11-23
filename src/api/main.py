@@ -130,6 +130,10 @@ async def general_exception_handler(request, exc: Exception):
 
 # ==================== HEALTH CHECK ====================
 
+from sqlalchemy import text
+
+# ...
+
 @app.get(
     f"{API_PREFIX}/health",
     response_model=HealthResponse,
@@ -139,7 +143,7 @@ async def health_check():
     """Vérifie l'état de santé de l'API"""
     try:
         with db_manager.get_session() as session:
-            session.execute("SELECT 1")
+            session.execute(text("SELECT 1"))
 
         return HealthResponse(
             status="healthy",
