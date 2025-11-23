@@ -62,8 +62,15 @@ class DriverManager:
                     options.binary_location = "/usr/bin/chromium"
                     service = Service('/usr/bin/chromedriver')
                 else:
-                    logger.info("Utilisation configuration standard Chrome")
-                    service = Service('/usr/local/bin/chromedriver')
+                    logger.info("Utilisation webdriver-manager pour Linux")
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    service = Service(ChromeDriverManager().install())
+                    
+                    # Définir explicitement le binaire Chrome si nécessaire
+                    if Path("/usr/bin/google-chrome").exists():
+                        options.binary_location = "/usr/bin/google-chrome"
+                    elif Path("/usr/bin/google-chrome-stable").exists():
+                        options.binary_location = "/usr/bin/google-chrome-stable"
 
             # Créer le driver
             self.driver = webdriver.Chrome(service=service, options=options)
