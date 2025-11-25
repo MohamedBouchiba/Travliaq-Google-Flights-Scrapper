@@ -21,15 +21,20 @@ Documentation: http://localhost:8000/api/v1/docs
 ## Endpoints
 
 ### GET /api/v1/calendar-prices
+
 Récupère les prix du calendrier.
 
 Paramètres:
+
 - origin: Code IATA départ
-- destination: Code IATA arrivée  
+- destination: Code IATA arrivée
 - months: Nombre de mois (défaut: 3)
 - force_refresh: Forcer re-scraping (défaut: false)
 
 Exemple:
+
 ```bash
 curl "http://localhost:8000/api/v1/calendar-prices?origin=BRU&destination=CDG&months=3"
+
+curl "https://travliaq-google-flights-scrapper-production.up.railway.app/api/v1/health"
 ```
